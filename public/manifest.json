@@ -1,0 +1,16 @@
+{
+  "name": "和风天气",
+  "short_name": "天气",
+  "description": "简洁的和风天气PWA应用",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f8f8f8",
+  "theme_color": "#2196f3",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48 72x72 96x96 128x128 256x256 512x512",
+      "type": "image/x-icon"
+    }
+  ]
+} 
