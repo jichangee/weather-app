@@ -129,7 +129,7 @@ export default function Home() {
           <div className="rounded-2xl bg-white shadow p-4 flex flex-col gap-1 animate-fadein-slow">
             <div className="font-semibold text-lg mb-1 flex items-center gap-2">
               <span>降水</span>
-              <span className="text-blue-400 animate-bounce">☔</span>
+              { rain.summary === '未来两小时无降水' ? null : <span className="text-blue-400 animate-bounce">☔</span>}
             </div>
             <div className="text-sm text-gray-600">{rain.summary}</div>
             <div className="text-xs text-gray-400 mt-1">更新时间：{formatTime(rain.updateTime)}</div>
