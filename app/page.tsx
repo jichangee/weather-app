@@ -153,7 +153,7 @@ export default function Home() {
           <div className="rounded-2xl bg-white shadow p-4 animate-fadein-slow">
             <div className="font-semibold text-lg mb-2">24小时预报</div>
             <div className="flex gap-3 overflow-x-auto pb-2">
-              {weatherHourly.hourly.slice(0, 12).map((h: any, i: number) => (
+              {weatherHourly.hourly.slice(0, 24).map((h: any, i: number) => (
                 <div key={i} className="flex flex-col items-center min-w-[56px] transition-transform duration-300 hover:scale-110">
                   <div className="text-xs text-gray-500 mb-1">{h.fxTime.slice(11, 16)}</div>
                   <WeatherIcon icon={h.icon} size={32} alt={h.text} />
