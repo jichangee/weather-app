@@ -103,19 +103,26 @@ export default function Home() {
   useEffect(() => {
     if (location) {
       setWeatherError(null);
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+      
       Promise.all([
         fetchQWeather("rain", location.lat, location.lon),
         fetchQWeather("now", location.lat, location.lon),
         fetchQWeather("hourly", location.lat, location.lon),
         fetchQWeather("daily", location.lat, location.lon),
         fetchQWeather("sun", location.lat, location.lon),
+        fetch(`${HOST}/v7/astronomy/sun?location=${location.lon},${location.lat}&key=${QWEATHER_KEY}&date=${tomorrow}`).then(res => res.json()),
       ])
-        .then(([rainData, nowData, hourlyData, dailyData, sunData]) => {
+        .then(([rainData, nowData, hourlyData, dailyData, sunDataToday, sunDataTomorrow]) => {
           setRain(rainData);
           setWeatherNow(nowData);
           setWeatherHourly(hourlyData);
           setWeatherDaily(dailyData);
-          setSunData(sunData);
+          setSunData({
+            today: sunDataToday,
+            tomorrow: sunDataTomorrow
+          });
         })
         .catch((e) => {
           setWeatherError("天气数据获取失败: " + e.message);
@@ -184,40 +191,28 @@ export default function Home() {
                 });
                 
                 // 添加日出日落数据
-                if (sunData && sunData.code === "200") {
-                  const now = new Date();
-                  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                  const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-                  
-                  // 日出 - 检查是否是明天的日出
-                  const sunriseDate = new Date(sunData.sunrise);
-                  let sunriseTimestamp = sunriseDate.getTime();
-                  let sunriseLabel = sunData.sunrise.slice(11, 16);
-                  
-                  // 如果日出时间是明天的，调整到明天的时间段
-                  if (sunriseDate < todayStart) {
-                    sunriseTimestamp = sunriseDate.getTime() + 24 * 60 * 60 * 1000;
-                    sunriseLabel = sunData.sunrise.slice(11, 16);
-                  }
-                  
-                  timelineItems.push({
-                    type: 'sunrise',
-                    time: sunData.sunrise,
-                    timeLabel: sunriseLabel,
-                    icon: '100',
-                    text: '日出',
-                    timestamp: sunriseTimestamp
-                  });
-                  
-                  // 日落 - 直接使用完整的时间格式
+                if (sunData && sunData.today && sunData.today.code === "200") {
+                  // 今天的日落
                   timelineItems.push({
                     type: 'sunset',
-                    time: sunData.sunset,
-                    timeLabel: sunData.sunset.slice(11, 16), // 提取 HH:MM 部分
-                    icon: '101',
+                    time: sunData.today.sunset,
+                    timeLabel: sunData.today.sunset.slice(11, 16),
+                    icon: '150',
                     text: '日落',
-                    timestamp: new Date(sunData.sunset).getTime()
+                    timestamp: new Date(sunData.today.sunset).getTime()
                   });
+                  
+                  // 明天的日出
+                  if (sunData.tomorrow && sunData.tomorrow.code === "200") {
+                    timelineItems.push({
+                      type: 'sunrise',
+                      time: sunData.tomorrow.sunrise,
+                      timeLabel: sunData.tomorrow.sunrise.slice(11, 16),
+                      icon: '100',
+                      text: '日出',
+                      timestamp: new Date(sunData.tomorrow.sunrise).getTime()
+                    });
+                  }
                 }
                 
                 // 按时间排序，确保日出日落插入到正确位置
