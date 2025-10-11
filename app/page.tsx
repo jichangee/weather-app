@@ -36,6 +36,12 @@ function formatTime(str: string) {
   return str.replace(/T/, " ").replace(/:00\+08:00$/, "");
 }
 
+function getDayOfWeek(dateStr: string) {
+  const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const date = new Date(dateStr);
+  return days[date.getDay()];
+}
+
 function WeatherIcon({ icon, size = 40, alt = "" }: { icon: string, size?: number, alt?: string }) {
   return (
     <i className={`qi-${icon}`} style={{ fontSize: size }}></i>
@@ -171,7 +177,7 @@ export default function Home() {
             <div className="flex flex-col gap-2">
               {weatherDaily.daily.map((d: any, i: number) => (
                 <div key={i} className="flex items-center justify-between text-sm px-2 py-1 rounded-lg hover:bg-gray-50 transition group">
-                  <span className="w-16 text-gray-500">{d.fxDate.slice(5)}</span>
+                  <span className="w-20 text-gray-500">{d.fxDate.slice(5)} {getDayOfWeek(d.fxDate)}</span>
                   <span className="flex-1 text-gray-700 flex items-center gap-2">
                     <WeatherIcon icon={d.iconDay} size={28} alt={d.textDay} />
                     {d.textDay}
