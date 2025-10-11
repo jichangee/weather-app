@@ -24,7 +24,8 @@ async function fetchQWeather(type: string, lat: number, lon: number) {
       url = `${HOST}/geo/v2/city/lookup?location=${loc}&key=${QWEATHER_KEY}`;
       break;
     case "sun":
-      url = `${HOST}/v7/astronomy/sun?location=${loc}&key=${QWEATHER_KEY}`;
+      const today = new Date().toISOString().slice(0, 10);
+      url = `${HOST}/v7/astronomy/sun?location=${loc}&key=${QWEATHER_KEY}&date=${today}`;
       break;
     default:
       return null;
