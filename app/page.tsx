@@ -166,32 +166,82 @@ export default function Home() {
           <div className="rounded-2xl bg-white shadow p-4 animate-fadein-slow">
             <div className="font-semibold text-lg mb-2">24小时预报</div>
             <div className="flex gap-3 overflow-x-auto pb-2">
-              {weatherHourly.hourly.slice(0, 24).map((h: any, i: number) => {
-                const hour = parseInt(h.fxTime.slice(11, 13));
-                const isSunriseHour = sunData && sunData.code === "200" && sunData.sunrise &&
-                  hour === parseInt(sunData.sunrise.slice(0, 2));
-                const isSunsetHour = sunData && sunData.code === "200" && sunData.sunset &&
-                  hour === parseInt(sunData.sunset.slice(0, 2));
-
-                return (
-                  <div key={i} className={`flex flex-col items-center min-w-[56px] transition-transform duration-300 hover:scale-110 ${isSunriseHour || isSunsetHour ? 'relative' : ''}`}>
-                    <div className="text-xs text-gray-500 mb-1">{h.fxTime.slice(11, 16)}</div>
-                    <WeatherIcon icon={h.icon} size={32} alt={h.text} />
-                    <div className="text-base font-semibold">{h.temp}°</div>
-                    <div className="text-xs text-gray-500">{h.text}</div>
-                    {isSunriseHour && (
-                      <div className="absolute -top-2 -right-1 text-xs bg-orange-100 text-orange-600 rounded-full px-1 py-0.5">
-                        日出
-                      </div>
+              {(() => {
+                // 创建包含日出日落的时间线数据
+                const timelineItems: any[] = [];
+                
+                // 添加小时预报数据
+                weatherHourly.hourly.slice(0, 24).forEach((h: any) => {
+                  timelineItems.push({
+                    type: 'hourly',
+                    time: h.fxTime.slice(11, 16),
+                    timeLabel: h.fxTime.slice(11, 16),
+                    icon: h.icon,
+                    temp: h.temp,
+                    text: h.text,
+                    timestamp: new Date(h.fxTime).getTime()
+                  });
+                });
+                
+                // 添加日出日落数据
+                if (sunData && sunData.code === "200") {
+                  const now = new Date();
+                  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                  const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+                  
+                  // 日出 - 检查是否是明天的日出
+                  const sunriseDate = new Date(sunData.sunrise);
+                  let sunriseTimestamp = sunriseDate.getTime();
+                  let sunriseLabel = sunData.sunrise.slice(11, 16);
+                  
+                  // 如果日出时间是明天的，调整到明天的时间段
+                  if (sunriseDate < todayStart) {
+                    sunriseTimestamp = sunriseDate.getTime() + 24 * 60 * 60 * 1000;
+                    sunriseLabel = sunData.sunrise.slice(11, 16);
+                  }
+                  
+                  timelineItems.push({
+                    type: 'sunrise',
+                    time: sunData.sunrise,
+                    timeLabel: sunriseLabel,
+                    icon: '100',
+                    text: '日出',
+                    timestamp: sunriseTimestamp
+                  });
+                  
+                  // 日落 - 直接使用完整的时间格式
+                  timelineItems.push({
+                    type: 'sunset',
+                    time: sunData.sunset,
+                    timeLabel: sunData.sunset.slice(11, 16), // 提取 HH:MM 部分
+                    icon: '101',
+                    text: '日落',
+                    timestamp: new Date(sunData.sunset).getTime()
+                  });
+                }
+                
+                // 按时间排序，确保日出日落插入到正确位置
+                timelineItems.sort((a, b) => a.timestamp - b.timestamp);
+                
+                return timelineItems.map((item, i) => (
+                  <div key={i} className="flex flex-col items-center min-w-[56px] transition-transform duration-300 hover:scale-110">
+                    <div className="text-xs text-gray-500 mb-1">{item.timeLabel}</div>
+                    {item.type === 'sunrise' || item.type === 'sunset' ? (
+                      <WeatherIcon icon={item.icon} size={32} alt={item.text} />
+                    ) : (
+                      <WeatherIcon icon={item.icon} size={32} alt={item.text} />
                     )}
-                    {isSunsetHour && (
-                      <div className="absolute -top-2 -right-1 text-xs bg-purple-100 text-purple-600 rounded-full px-1 py-0.5">
-                        日落
-                      </div>
+                    {item.type === 'sunrise' || item.type === 'sunset' ? (
+                      <div className="text-xs text-orange-500 font-medium">{item.text}</div>
+                    ) : (
+                      <>
+                        <div className="text-base font-semibold">{item.temp}°</div>
+                        <div className="text-xs text-gray-500">{item.text}</div>
+                      </>
                     )}
                   </div>
-                );
-              })}
+                ));
+              })()}
             </div>
           </div>
         )}
