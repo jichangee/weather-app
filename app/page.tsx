@@ -23,6 +23,9 @@ async function fetchQWeather(type: string, lat: number, lon: number) {
     case "city":
       url = `${HOST}/geo/v2/city/lookup?location=${loc}&key=${QWEATHER_KEY}`;
       break;
+    case "sun":
+      url = `${HOST}/v7/astronomy/sun?location=${loc}&key=${QWEATHER_KEY}`;
+      break;
     default:
       return null;
   }
@@ -59,6 +62,7 @@ export default function Home() {
   const [weatherHourly, setWeatherHourly] = useState<any>(null);
   const [weatherDaily, setWeatherDaily] = useState<any>(null);
   const [rain, setRain] = useState<any>(null);
+  const [sunData, setSunData] = useState<any>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -103,12 +107,14 @@ export default function Home() {
         fetchQWeather("now", location.lat, location.lon),
         fetchQWeather("hourly", location.lat, location.lon),
         fetchQWeather("daily", location.lat, location.lon),
+        fetchQWeather("sun", location.lat, location.lon),
       ])
-        .then(([rainData, nowData, hourlyData, dailyData]) => {
+        .then(([rainData, nowData, hourlyData, dailyData, sunData]) => {
           setRain(rainData);
           setWeatherNow(nowData);
           setWeatherHourly(hourlyData);
           setWeatherDaily(dailyData);
+          setSunData(sunData);
         })
         .catch((e) => {
           setWeatherError("天气数据获取失败: " + e.message);
@@ -159,14 +165,32 @@ export default function Home() {
           <div className="rounded-2xl bg-white shadow p-4 animate-fadein-slow">
             <div className="font-semibold text-lg mb-2">24小时预报</div>
             <div className="flex gap-3 overflow-x-auto pb-2">
-              {weatherHourly.hourly.slice(0, 24).map((h: any, i: number) => (
-                <div key={i} className="flex flex-col items-center min-w-[56px] transition-transform duration-300 hover:scale-110">
-                  <div className="text-xs text-gray-500 mb-1">{h.fxTime.slice(11, 16)}</div>
-                  <WeatherIcon icon={h.icon} size={32} alt={h.text} />
-                  <div className="text-base font-semibold">{h.temp}°</div>
-                  <div className="text-xs text-gray-500">{h.text}</div>
-                </div>
-              ))}
+              {weatherHourly.hourly.slice(0, 24).map((h: any, i: number) => {
+                const hour = parseInt(h.fxTime.slice(11, 13));
+                const isSunriseHour = sunData && sunData.code === "200" && sunData.sunrise &&
+                  hour === parseInt(sunData.sunrise.slice(0, 2));
+                const isSunsetHour = sunData && sunData.code === "200" && sunData.sunset &&
+                  hour === parseInt(sunData.sunset.slice(0, 2));
+
+                return (
+                  <div key={i} className={`flex flex-col items-center min-w-[56px] transition-transform duration-300 hover:scale-110 ${isSunriseHour || isSunsetHour ? 'relative' : ''}`}>
+                    <div className="text-xs text-gray-500 mb-1">{h.fxTime.slice(11, 16)}</div>
+                    <WeatherIcon icon={h.icon} size={32} alt={h.text} />
+                    <div className="text-base font-semibold">{h.temp}°</div>
+                    <div className="text-xs text-gray-500">{h.text}</div>
+                    {isSunriseHour && (
+                      <div className="absolute -top-2 -right-1 text-xs bg-orange-100 text-orange-600 rounded-full px-1 py-0.5">
+                        日出
+                      </div>
+                    )}
+                    {isSunsetHour && (
+                      <div className="absolute -top-2 -right-1 text-xs bg-purple-100 text-purple-600 rounded-full px-1 py-0.5">
+                        日落
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
