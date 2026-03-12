@@ -94,18 +94,114 @@ function getDayLabel(dateStr: string, index: number): string {
   return days[new Date(dateStr).getDay()];
 }
 
-function getBgGradient(): string {
+function getBgColors(): { from: string; to: string } {
   const h = new Date().getHours();
-  if (h < 6 || h >= 20) return "from-slate-900 via-blue-950 to-indigo-950";
-  if (h < 8) return "from-orange-400 via-pink-500 to-purple-700";
-  if (h < 17) return "from-sky-400 via-blue-500 to-indigo-600";
-  return "from-orange-500 via-rose-600 to-purple-700";
+  if (h < 6 || h >= 21) return { from: "#080e18", to: "#0f1a2e" };   // 夜：深邃墨蓝
+  if (h < 8)            return { from: "#16112a", to: "#2a1f45" };   // 晨曦：暗紫
+  if (h < 17)           return { from: "#0c1e35", to: "#1a3558" };   // 白天：深海蓝
+  return                       { from: "#14101f", to: "#261832" };   // 黄昏：暗紫蓝
 }
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
 function WeatherIcon({ icon, className = "" }: { icon: string; className?: string }) {
   return <i className={`qi-${icon} ${className}`} />;
+}
+
+function TempLineChart({ hourly }: { hourly: HourlyItem[] }) {
+  const data = hourly.slice(0, 24);
+  if (data.length < 2) return null;
+
+  const temps = data.map((h) => Number(h.temp));
+  const minT = Math.min(...temps) - 1;
+  const maxT = Math.max(...temps) + 1;
+  const range = maxT - minT;
+
+  const W = 420, H = 112;
+  const pL = 14, pR = 14, pT = 28, pB = 26;
+  const cW = W - pL - pR;
+  const cH = H - pT - pB;
+
+  const px = (i: number) => pL + (i / (data.length - 1)) * cW;
+  const py = (t: number) => pT + (1 - (t - minT) / range) * cH;
+  const pts = temps.map((t, i) => [px(i), py(t)] as [number, number]);
+
+  const linePath = pts
+    .map(([x, y], i) => {
+      if (i === 0) return `M${x.toFixed(1)},${y.toFixed(1)}`;
+      const [px0, py0] = pts[i - 1];
+      const cx = ((px0 + x) / 2).toFixed(1);
+      return `C${cx},${py0.toFixed(1)} ${cx},${y.toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  const areaPath = `${linePath} L${pts[pts.length - 1][0].toFixed(1)},${H - pB} L${pL},${H - pB}Z`;
+
+  // Evenly spread 6 labeled points
+  const step = Math.floor((data.length - 1) / 5);
+  const labelSet = new Set(Array.from({ length: 6 }, (_, i) => Math.min(i * step, data.length - 1)));
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ display: "block" }}>
+      <defs>
+        <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(120,180,255,0.28)" />
+          <stop offset="100%" stopColor="rgba(120,180,255,0)" />
+        </linearGradient>
+      </defs>
+
+      {/* Area fill */}
+      <path d={areaPath} fill="url(#tg)" />
+
+      {/* Line */}
+      <path
+        d={linePath}
+        fill="none"
+        stroke="rgba(150,200,255,0.85)"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+
+      {/* Points and labels */}
+      {pts.map(([x, y], i) => {
+        const show = labelSet.has(i);
+        const anchor = i === 0 ? "start" : i === data.length - 1 ? "end" : "middle";
+        return (
+          <g key={i}>
+            <circle
+              cx={x}
+              cy={y}
+              r={show ? 3.5 : 2}
+              fill={show ? "rgba(180,220,255,0.95)" : "rgba(150,200,255,0.4)"}
+            />
+            {show && (
+              <>
+                <text
+                  x={x}
+                  y={y - 9}
+                  textAnchor={anchor}
+                  fontSize="13"
+                  fill="rgba(220,240,255,0.88)"
+                  fontWeight="600"
+                >
+                  {temps[i]}°
+                </text>
+                <text
+                  x={x}
+                  y={H - 5}
+                  textAnchor={anchor}
+                  fontSize="11"
+                  fill="rgba(255,255,255,0.35)"
+                >
+                  {timePart(data[i].fxTime)}
+                </text>
+              </>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -218,57 +314,70 @@ export default function Home() {
 
   const isRaining = rain?.summary && rain.summary !== "未来两小时无降水";
   const now = weatherNow?.now;
-  const bg = getBgGradient();
+  const bgColors = getBgColors();
 
   return (
     <div className="min-h-screen relative overflow-hidden select-none">
-      <div className={`fixed inset-0 bg-gradient-to-b ${bg} -z-10`} />
-      <div className="fixed inset-0 -z-10"
-        style={{ background: "radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.08) 0%, transparent 70%)" }} />
+      {/* Soft dark background */}
+      <div
+        className="fixed inset-0 -z-10"
+        style={{
+          background: `linear-gradient(to bottom, ${bgColors.from}, ${bgColors.to})`,
+        }}
+      />
+      {/* Subtle top glow */}
+      <div
+        className="fixed inset-0 -z-10"
+        style={{
+          background:
+            "radial-gradient(ellipse 80% 40% at 50% 0%, rgba(100,160,255,0.06) 0%, transparent 70%)",
+        }}
+      />
 
       <div className="flex flex-col items-center px-4 pb-12">
 
-        {/* Location header */}
+        {/* Location */}
         <div className="w-full max-w-md pt-16 pb-2 text-center text-white">
           {loading ? (
-            <p className="text-sm opacity-50 animate-pulse">获取位置中…</p>
+            <p className="text-sm opacity-40 animate-pulse">获取位置中…</p>
           ) : geoError ? (
-            <p className="text-sm text-red-300">{geoError}</p>
+            <p className="text-sm text-red-400/80">{geoError}</p>
           ) : (
-            <p className="text-lg font-semibold tracking-wide">
+            <p className="text-base font-medium opacity-70 tracking-wide">
               {city ? `📍 ${city}` : ""}
             </p>
           )}
         </div>
 
-        {/* Hero - current weather */}
+        {/* Hero */}
         {now ? (
-          <div className="w-full max-w-md text-center text-white mt-1 mb-10 animate-fadein">
-            <WeatherIcon icon={now.icon} className="weather-icon-hero drop-shadow-2xl" />
+          <div className="w-full max-w-md text-center text-white mt-2 mb-10 animate-fadein">
+            <WeatherIcon icon={now.icon} className="weather-icon-hero opacity-90" />
             <div className="temp-hero font-extralight leading-none tracking-tighter tabular-nums">
               {now.temp}°
             </div>
-            <div className="text-2xl font-light mt-2 opacity-90">{now.text}</div>
-            <div className="text-sm opacity-55 mt-2.5 flex items-center justify-center gap-2">
+            <div className="text-xl font-light mt-2 opacity-75">{now.text}</div>
+            <div className="text-sm opacity-40 mt-2 flex items-center justify-center gap-2">
               <span>体感 {now.feelsLike}°</span>
-              <span className="opacity-40">·</span>
+              <span>·</span>
               <span>{now.windDir} {now.windScale}级</span>
             </div>
             {isRaining && (
-              <div className="mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/15 border border-white/20 text-sm backdrop-blur-sm">
+              <div className="mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm"
+                style={{ background: "rgba(100,160,255,0.15)", border: "1px solid rgba(100,160,255,0.25)" }}>
                 <span>🌧</span>
-                <span>{rain?.summary}</span>
+                <span className="opacity-80">{rain?.summary}</span>
               </div>
             )}
           </div>
         ) : dataLoading ? (
-          <div className="w-full max-w-md text-center text-white mt-8 mb-10">
-            <div className="text-sm opacity-40 animate-pulse">天气数据加载中…</div>
+          <div className="w-full max-w-md text-center text-white/30 text-sm mt-8 mb-10 animate-pulse">
+            天气数据加载中…
           </div>
         ) : null}
 
         {dataError && (
-          <div className="glass-card w-full max-w-md p-4 text-center text-white/60 text-sm mb-4">
+          <div className="glass-card w-full max-w-md p-4 text-center text-white/50 text-sm mb-4">
             {dataError}
           </div>
         )}
@@ -282,12 +391,12 @@ export default function Home() {
               <div className="flex gap-4 overflow-x-auto pb-1 scrollbar-hide">
                 {hourlyTimeline.map((item, i) => (
                   <div key={i} className="flex flex-col items-center min-w-[52px] gap-1.5">
-                    <span className="text-xs text-white/55">{item.label}</span>
-                    <WeatherIcon icon={item.icon} className="text-[26px]" />
+                    <span className="text-xs text-white/40">{item.label}</span>
+                    <WeatherIcon icon={item.icon} className="text-[24px] opacity-85" />
                     {item.type === "hour" ? (
-                      <span className="text-sm font-semibold text-white tabular-nums">{item.temp}°</span>
+                      <span className="text-sm font-semibold text-white/85 tabular-nums">{item.temp}°</span>
                     ) : (
-                      <span className="text-xs text-amber-300 font-medium">{item.text}</span>
+                      <span className="text-xs text-amber-400/80 font-medium">{item.text}</span>
                     )}
                   </div>
                 ))}
@@ -295,20 +404,28 @@ export default function Home() {
             </div>
           )}
 
+          {/* Temperature trend chart */}
+          {weatherHourly && (
+            <div className="glass-card px-4 pt-4 pb-3 animate-fadein-slow">
+              <p className="card-label">气温趋势</p>
+              <TempLineChart hourly={weatherHourly.hourly} />
+            </div>
+          )}
+
           {/* Daily forecast */}
           {weatherDaily && (
             <div className="glass-card p-4 animate-fadein-slow">
               <p className="card-label">7 天天气</p>
-              <div className="divide-y divide-white/10">
+              <div className="divide-y divide-white/8">
                 {weatherDaily.daily.map((d, i) => (
                   <div key={i} className="flex items-center py-3 text-white gap-3">
-                    <span className="w-10 text-sm shrink-0">{getDayLabel(d.fxDate, i)}</span>
-                    <WeatherIcon icon={d.iconDay} className="text-xl shrink-0" />
-                    <span className="text-sm opacity-65 flex-1 truncate">{d.textDay}</span>
+                    <span className="w-10 text-sm opacity-70 shrink-0">{getDayLabel(d.fxDate, i)}</span>
+                    <WeatherIcon icon={d.iconDay} className="text-xl opacity-80 shrink-0" />
+                    <span className="text-sm opacity-50 flex-1 truncate">{d.textDay}</span>
                     <span className="text-sm tabular-nums shrink-0">
-                      <span className="opacity-45">{d.tempMin}°</span>
-                      <span className="mx-1 opacity-25">/</span>
-                      <span>{d.tempMax}°</span>
+                      <span className="opacity-35">{d.tempMin}°</span>
+                      <span className="mx-1 opacity-20">/</span>
+                      <span className="opacity-75">{d.tempMax}°</span>
                     </span>
                   </div>
                 ))}
@@ -324,15 +441,15 @@ export default function Home() {
                   <p className="card-label">日出 · 日落</p>
                   <div className="flex justify-around mt-1">
                     <div className="text-center">
-                      <WeatherIcon icon="100" className="text-2xl text-amber-300" />
-                      <p className="text-[11px] text-white/45 mt-1.5">日出</p>
-                      <p className="text-sm font-semibold text-white tabular-nums">{timePart(sunToday.sunrise)}</p>
+                      <WeatherIcon icon="100" className="text-2xl text-amber-400/70" />
+                      <p className="text-[11px] text-white/35 mt-1.5">日出</p>
+                      <p className="text-sm font-semibold text-white/80 tabular-nums">{timePart(sunToday.sunrise)}</p>
                     </div>
-                    <div className="w-px bg-white/15 self-stretch mx-1" />
+                    <div className="w-px self-stretch mx-1" style={{ background: "rgba(255,255,255,0.1)" }} />
                     <div className="text-center">
-                      <WeatherIcon icon="150" className="text-2xl text-orange-400" />
-                      <p className="text-[11px] text-white/45 mt-1.5">日落</p>
-                      <p className="text-sm font-semibold text-white tabular-nums">{timePart(sunToday.sunset)}</p>
+                      <WeatherIcon icon="150" className="text-2xl text-orange-400/70" />
+                      <p className="text-[11px] text-white/35 mt-1.5">日落</p>
+                      <p className="text-sm font-semibold text-white/80 tabular-nums">{timePart(sunToday.sunset)}</p>
                     </div>
                   </div>
                 </div>
@@ -343,13 +460,15 @@ export default function Home() {
                   <p className="card-label">湿度 · 能见度</p>
                   <div className="flex justify-around mt-1">
                     <div className="text-center">
-                      <p className="text-xl font-semibold text-white tabular-nums">{now.humidity}<span className="text-sm font-normal">%</span></p>
-                      <p className="text-[11px] text-white/45 mt-1.5">湿度</p>
+                      <p className="text-xl font-semibold text-white/80 tabular-nums">
+                        {now.humidity}<span className="text-sm font-normal">%</span>
+                      </p>
+                      <p className="text-[11px] text-white/35 mt-1.5">湿度</p>
                     </div>
-                    <div className="w-px bg-white/15 self-stretch mx-1" />
+                    <div className="w-px self-stretch mx-1" style={{ background: "rgba(255,255,255,0.1)" }} />
                     <div className="text-center">
-                      <p className="text-xl font-semibold text-white tabular-nums">{now.vis}</p>
-                      <p className="text-[11px] text-white/45 mt-1.5">能见度 km</p>
+                      <p className="text-xl font-semibold text-white/80 tabular-nums">{now.vis}</p>
+                      <p className="text-[11px] text-white/35 mt-1.5">能见度 km</p>
                     </div>
                   </div>
                 </div>
@@ -358,35 +477,35 @@ export default function Home() {
           )}
         </div>
 
-        <footer className="text-[11px] text-white/25 mt-8 tracking-wide">
+        <footer className="text-[11px] text-white/20 mt-8 tracking-wide">
           数据来源：和风天气 QWeather
         </footer>
       </div>
 
       <style>{`
-        .animate-fadein { animation: fadein 0.7s ease-out both; }
+        .animate-fadein      { animation: fadein 0.7s ease-out both; }
         .animate-fadein-slow { animation: fadein 1.1s ease-out both; }
         @keyframes fadein {
-          from { opacity: 0; transform: translateY(18px); }
+          from { opacity: 0; transform: translateY(16px); }
           to   { opacity: 1; transform: none; }
         }
         .glass-card {
-          background: rgba(255, 255, 255, 0.13);
-          backdrop-filter: blur(24px);
-          -webkit-backdrop-filter: blur(24px);
+          background: rgba(255, 255, 255, 0.07);
+          backdrop-filter: blur(28px);
+          -webkit-backdrop-filter: blur(28px);
           border-radius: 20px;
-          border: 1px solid rgba(255, 255, 255, 0.22);
+          border: 1px solid rgba(255, 255, 255, 0.11);
         }
         .card-label {
           font-size: 11px;
           font-weight: 600;
-          letter-spacing: 0.08em;
+          letter-spacing: 0.09em;
           text-transform: uppercase;
-          color: rgba(255,255,255,0.45);
+          color: rgba(255, 255, 255, 0.35);
           margin-bottom: 12px;
         }
-        .weather-icon-hero { font-size: 72px; display: block; }
-        .temp-hero { font-size: clamp(80px, 22vw, 104px); }
+        .weather-icon-hero { font-size: 68px; display: block; }
+        .temp-hero { font-size: clamp(80px, 22vw, 100px); }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
