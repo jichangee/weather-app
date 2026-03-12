@@ -384,26 +384,6 @@ export default function Home() {
 
         <div className="w-full max-w-md flex flex-col gap-3">
 
-          {/* Hourly forecast */}
-          {weatherHourly && (
-            <div className="glass-card p-4 animate-fadein">
-              <p className="card-label">每小时预报</p>
-              <div className="flex gap-4 overflow-x-auto pb-1 scrollbar-hide">
-                {hourlyTimeline.map((item, i) => (
-                  <div key={i} className="flex flex-col items-center min-w-[52px] gap-1.5">
-                    <span className="text-xs text-white/40">{item.label}</span>
-                    <WeatherIcon icon={item.icon} className="text-[24px] opacity-85" />
-                    {item.type === "hour" ? (
-                      <span className="text-sm font-semibold text-white/85 tabular-nums">{item.temp}°</span>
-                    ) : (
-                      <span className="text-xs text-amber-400/80 font-medium">{item.text}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Temperature trend chart */}
           {weatherHourly && (
             <div className="glass-card px-4 pt-4 pb-3 animate-fadein-slow">
