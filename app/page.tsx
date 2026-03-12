@@ -1,270 +1,394 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface NowWeather {
+  icon: string;
+  text: string;
+  temp: string;
+  feelsLike: string;
+  windDir: string;
+  windScale: string;
+  humidity: string;
+  vis: string;
+}
+
+interface HourlyItem {
+  fxTime: string;
+  icon: string;
+  temp: string;
+  text: string;
+}
+
+interface DailyItem {
+  fxDate: string;
+  iconDay: string;
+  textDay: string;
+  tempMin: string;
+  tempMax: string;
+}
+
+interface NowResponse {
+  code: string;
+  updateTime: string;
+  now: NowWeather;
+}
+
+interface HourlyResponse {
+  code: string;
+  hourly: HourlyItem[];
+}
+
+interface DailyResponse {
+  code: string;
+  daily: DailyItem[];
+}
+
+interface RainResponse {
+  code: string;
+  updateTime: string;
+  summary: string;
+}
+
+interface SunResponse {
+  code: string;
+  sunrise: string;
+  sunset: string;
+}
+
+interface CityResponse {
+  code: string;
+  location: Array<{ name: string }>;
+}
+
+// ─── API ─────────────────────────────────────────────────────────────────────
 
 const HOST = process.env.NEXT_PUBLIC_QWEATHER_HOST;
-const QWEATHER_KEY = process.env.NEXT_PUBLIC_QWEATHER_KEY;
+const KEY = process.env.NEXT_PUBLIC_QWEATHER_KEY;
 
-async function fetchQWeather(type: string, lat: number, lon: number) {
-  let url = "";
-  const loc = `${lon},${lat}`;
-  switch (type) {
-    case "now":
-      url = `${HOST}/v7/weather/now?location=${loc}&key=${QWEATHER_KEY}`;
-      break;
-    case "hourly":
-      url = `${HOST}/v7/weather/24h?location=${loc}&key=${QWEATHER_KEY}`;
-      break;
-    case "daily":
-      url = `${HOST}/v7/weather/7d?location=${loc}&key=${QWEATHER_KEY}`;
-      break;
-    case "rain":
-      url = `${HOST}/v7/minutely/5m?location=${loc}&key=${QWEATHER_KEY}`;
-      break;
-    case "city":
-      url = `${HOST}/geo/v2/city/lookup?location=${loc}&key=${QWEATHER_KEY}`;
-      break;
-    case "sun":
-      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      url = `${HOST}/v7/astronomy/sun?location=${loc}&key=${QWEATHER_KEY}&date=${today}`;
-      break;
-    default:
-      return null;
-  }
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("天气数据获取失败");
-  return res.json();
+async function fetchApi<T>(path: string, params: Record<string, string>): Promise<T> {
+  const qs = new URLSearchParams({ key: KEY!, ...params });
+  const res = await fetch(`${HOST}${path}?${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json() as Promise<T>;
 }
 
-function formatTime(str: string) {
-  if (!str) return "";
-  return str.replace(/T/, " ").replace(/:00\+08:00$/, "");
+// ─── Utils ────────────────────────────────────────────────────────────────────
+
+function dateCode(offset = 0): string {
+  return new Date(Date.now() + offset * 86_400_000)
+    .toISOString()
+    .slice(0, 10)
+    .replace(/-/g, "");
 }
 
-function getDayOfWeek(dateStr: string) {
-  const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-  const date = new Date(dateStr);
-  return days[date.getDay()];
+function timePart(isoStr: string): string {
+  return isoStr?.slice(11, 16) ?? "";
 }
 
-function WeatherIcon({ icon, size = 40, alt = "" }: { icon: string, size?: number, alt?: string }) {
-  return (
-    <i className={`qi-${icon}`} style={{ fontSize: size }}></i>
-  );
+function getDayLabel(dateStr: string, index: number): string {
+  if (index === 0) return "今天";
+  if (index === 1) return "明天";
+  const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  return days[new Date(dateStr).getDay()];
 }
+
+function getBgGradient(): string {
+  const h = new Date().getHours();
+  if (h < 6 || h >= 20) return "from-slate-900 via-blue-950 to-indigo-950";
+  if (h < 8) return "from-orange-400 via-pink-500 to-purple-700";
+  if (h < 17) return "from-sky-400 via-blue-500 to-indigo-600";
+  return "from-orange-500 via-rose-600 to-purple-700";
+}
+
+// ─── Components ───────────────────────────────────────────────────────────────
+
+function WeatherIcon({ icon, className = "" }: { icon: string; className?: string }) {
+  return <i className={`qi-${icon} ${className}`} />;
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
-  const [city, setCity] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // 天气数据
-  const [weatherNow, setWeatherNow] = useState<any>(null);
-  const [weatherHourly, setWeatherHourly] = useState<any>(null);
-  const [weatherDaily, setWeatherDaily] = useState<any>(null);
-  const [rain, setRain] = useState<any>(null);
-  const [sunData, setSunData] = useState<any>(null);
-  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [city, setCity] = useState("");
+  const [weatherNow, setWeatherNow] = useState<NowResponse | null>(null);
+  const [weatherHourly, setWeatherHourly] = useState<HourlyResponse | null>(null);
+  const [weatherDaily, setWeatherDaily] = useState<DailyResponse | null>(null);
+  const [rain, setRain] = useState<RainResponse | null>(null);
+  const [sunToday, setSunToday] = useState<SunResponse | null>(null);
+  const [sunTomorrow, setSunTomorrow] = useState<SunResponse | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [dataLoading, setDataLoading] = useState(false);
 
   useEffect(() => {
     if (!navigator.geolocation) {
-      setError("当前浏览器不支持定位功能");
+      setGeoError("浏览器不支持定位");
       setLoading(false);
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+      ({ coords }) => {
+        setLocation({ lat: coords.latitude, lon: coords.longitude });
         setLoading(false);
       },
-      (err) => {
-        setError("定位失败: " + err.message);
+      ({ message }) => {
+        setGeoError(`定位失败: ${message}`);
         setLoading(false);
       }
     );
   }, []);
 
-  // 获取城市名
   useEffect(() => {
-    if (location) {
-      fetchQWeather("city", location.lat, location.lon)
-        .then((data) => {
-          if (data && data.code === "200" && data.location && data.location[0]) {
-            setCity(data.location[0].name);
-          } else {
-            setCity("");
-          }
-        })
-        .catch(() => setCity(""));
-    }
+    if (!location) return;
+    const loc = `${location.lon},${location.lat}`;
+    setDataError(null);
+    setDataLoading(true);
+
+    fetchApi<CityResponse>("/geo/v2/city/lookup", { location: loc })
+      .then((d) => setCity(d?.location?.[0]?.name ?? ""))
+      .catch(() => setCity(""));
+
+    Promise.all([
+      fetchApi<RainResponse>("/v7/minutely/5m", { location: loc }),
+      fetchApi<NowResponse>("/v7/weather/now", { location: loc }),
+      fetchApi<HourlyResponse>("/v7/weather/24h", { location: loc }),
+      fetchApi<DailyResponse>("/v7/weather/7d", { location: loc }),
+      fetchApi<SunResponse>("/v7/astronomy/sun", { location: loc, date: dateCode(0) }),
+      fetchApi<SunResponse>("/v7/astronomy/sun", { location: loc, date: dateCode(1) }),
+    ])
+      .then(([r, now, hourly, daily, sun0, sun1]) => {
+        if (r?.code === "200") setRain(r);
+        if (now?.code === "200") setWeatherNow(now);
+        if (hourly?.code === "200") setWeatherHourly(hourly);
+        if (daily?.code === "200") setWeatherDaily(daily);
+        if (sun0?.code === "200") setSunToday(sun0);
+        if (sun1?.code === "200") setSunTomorrow(sun1);
+      })
+      .catch((e: Error) => setDataError("数据获取失败: " + e.message))
+      .finally(() => setDataLoading(false));
   }, [location]);
 
-  // 获取天气
-  useEffect(() => {
-    if (location) {
-      setWeatherError(null);
-      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
-      
-      Promise.all([
-        fetchQWeather("rain", location.lat, location.lon),
-        fetchQWeather("now", location.lat, location.lon),
-        fetchQWeather("hourly", location.lat, location.lon),
-        fetchQWeather("daily", location.lat, location.lon),
-        fetchQWeather("sun", location.lat, location.lon),
-        fetch(`${HOST}/v7/astronomy/sun?location=${location.lon},${location.lat}&key=${QWEATHER_KEY}&date=${tomorrow}`).then(res => res.json()),
-      ])
-        .then(([rainData, nowData, hourlyData, dailyData, sunDataToday, sunDataTomorrow]) => {
-          setRain(rainData);
-          setWeatherNow(nowData);
-          setWeatherHourly(hourlyData);
-          setWeatherDaily(dailyData);
-          setSunData({
-            today: sunDataToday,
-            tomorrow: sunDataTomorrow
-          });
-        })
-        .catch((e) => {
-          setWeatherError("天气数据获取失败: " + e.message);
-        });
+  const hourlyTimeline = useMemo(() => {
+    if (!weatherHourly?.hourly) return [];
+
+    type TimelineItem = {
+      type: "hour" | "sunrise" | "sunset";
+      label: string;
+      icon: string;
+      temp?: string;
+      text: string;
+      ts: number;
+    };
+
+    const items: TimelineItem[] = weatherHourly.hourly.slice(0, 24).map((h) => ({
+      type: "hour",
+      label: timePart(h.fxTime),
+      icon: h.icon,
+      temp: h.temp,
+      text: h.text,
+      ts: new Date(h.fxTime).getTime(),
+    }));
+
+    if (sunToday?.sunset) {
+      items.push({
+        type: "sunset",
+        label: timePart(sunToday.sunset),
+        icon: "150",
+        text: "日落",
+        ts: new Date(sunToday.sunset).getTime(),
+      });
     }
-  }, [location]);
+
+    if (sunTomorrow?.sunrise) {
+      items.push({
+        type: "sunrise",
+        label: timePart(sunTomorrow.sunrise),
+        icon: "100",
+        text: "日出",
+        ts: new Date(sunTomorrow.sunrise).getTime(),
+      });
+    }
+
+    return items.sort((a, b) => a.ts - b.ts);
+  }, [weatherHourly, sunToday, sunTomorrow]);
+
+  const isRaining = rain?.summary && rain.summary !== "未来两小时无降水";
+  const now = weatherNow?.now;
+  const bg = getBgGradient();
 
   return (
-    <div className="flex flex-col items-center min-h-screen bg-[#f8f8f8] text-[#222] p-4">
-      <h1 className="text-2xl font-semibold mb-2 mt-8 tracking-tight animate-fadein">和风天气</h1>
-      <div className="text-base text-gray-600 mb-4 animate-fadein-slow">{city && <span>📍{city}</span>}</div>
-      <div className="w-full max-w-md flex flex-col gap-4">
-        {/* 定位与错误 */}
-        {(loading || error) && <div className="rounded-2xl bg-white shadow p-4 text-center transition-all duration-500 animate-fadein">
-          {loading && <div>正在获取定位信息…</div>}
-          {error && <div className="text-red-500">{error}</div>}
-        </div>}
-        {/* 天气错误 */}
-        {weatherError && (
-          <div className="rounded-2xl bg-white shadow p-4 text-center text-red-500 animate-fadein">{weatherError}</div>
-        )}
-        {/* 降水 */}
-        {rain && rain.code === "200" && (
-          <div className="rounded-2xl bg-white shadow p-4 flex flex-col gap-1 animate-fadein-slow">
-            <div className="font-semibold text-lg mb-1 flex items-center gap-2">
-              <span>降水</span>
-              { rain.summary === '未来两小时无降水' ? null : <span className="text-blue-400 animate-bounce">☔</span>}
+    <div className="min-h-screen relative overflow-hidden select-none">
+      <div className={`fixed inset-0 bg-gradient-to-b ${bg} -z-10`} />
+      <div className="fixed inset-0 -z-10"
+        style={{ background: "radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.08) 0%, transparent 70%)" }} />
+
+      <div className="flex flex-col items-center px-4 pb-12">
+
+        {/* Location header */}
+        <div className="w-full max-w-md pt-16 pb-2 text-center text-white">
+          {loading ? (
+            <p className="text-sm opacity-50 animate-pulse">获取位置中…</p>
+          ) : geoError ? (
+            <p className="text-sm text-red-300">{geoError}</p>
+          ) : (
+            <p className="text-lg font-semibold tracking-wide">
+              {city ? `📍 ${city}` : ""}
+            </p>
+          )}
+        </div>
+
+        {/* Hero - current weather */}
+        {now ? (
+          <div className="w-full max-w-md text-center text-white mt-1 mb-10 animate-fadein">
+            <WeatherIcon icon={now.icon} className="weather-icon-hero drop-shadow-2xl" />
+            <div className="temp-hero font-extralight leading-none tracking-tighter tabular-nums">
+              {now.temp}°
             </div>
-            <div className="text-sm text-gray-600">{rain.summary}</div>
-            <div className="text-xs text-gray-400 mt-1">更新时间：{formatTime(rain.updateTime)}</div>
+            <div className="text-2xl font-light mt-2 opacity-90">{now.text}</div>
+            <div className="text-sm opacity-55 mt-2.5 flex items-center justify-center gap-2">
+              <span>体感 {now.feelsLike}°</span>
+              <span className="opacity-40">·</span>
+              <span>{now.windDir} {now.windScale}级</span>
+            </div>
+            {isRaining && (
+              <div className="mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/15 border border-white/20 text-sm backdrop-blur-sm">
+                <span>🌧</span>
+                <span>{rain?.summary}</span>
+              </div>
+            )}
+          </div>
+        ) : dataLoading ? (
+          <div className="w-full max-w-md text-center text-white mt-8 mb-10">
+            <div className="text-sm opacity-40 animate-pulse">天气数据加载中…</div>
+          </div>
+        ) : null}
+
+        {dataError && (
+          <div className="glass-card w-full max-w-md p-4 text-center text-white/60 text-sm mb-4">
+            {dataError}
           </div>
         )}
-        {/* 实时天气 */}
-        {weatherNow && weatherNow.code === "200" && (
-          <div className="rounded-2xl bg-white shadow p-4 flex flex-col gap-1 items-center animate-fadein">
-            <div className="font-semibold text-lg mb-1">实时天气</div>
-            <div className="flex items-end gap-2">
-              <WeatherIcon icon={weatherNow.now.icon} size={56} alt={weatherNow.now.text} />
-              <span className="text-4xl font-bold animate-fadein">{weatherNow.now.temp}°</span>
-              <span className="text-base text-gray-500">{weatherNow.now.text}</span>
-            </div>
-            <div className="text-sm text-gray-600 mt-1">体感温度 {weatherNow.now.feelsLike}°，{weatherNow.now.windDir} {weatherNow.now.windScale}级</div>
-            <div className="text-xs text-gray-400 mt-1">更新时间：{formatTime(weatherNow.updateTime)}</div>
-          </div>
-        )}
-        {/* 逐小时预报 */}
-        {weatherHourly && weatherHourly.code === "200" && (
-          <div className="rounded-2xl bg-white shadow p-4 animate-fadein-slow">
-            <div className="font-semibold text-lg mb-2">24小时预报</div>
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {(() => {
-                // 创建包含日出日落的时间线数据
-                const timelineItems: any[] = [];
-                
-                // 添加小时预报数据
-                weatherHourly.hourly.slice(0, 24).forEach((h: any) => {
-                  timelineItems.push({
-                    type: 'hourly',
-                    time: h.fxTime.slice(11, 16),
-                    timeLabel: h.fxTime.slice(11, 16),
-                    icon: h.icon,
-                    temp: h.temp,
-                    text: h.text,
-                    timestamp: new Date(h.fxTime).getTime()
-                  });
-                });
-                
-                // 添加日出日落数据
-                if (sunData && sunData.today && sunData.today.code === "200") {
-                  // 今天的日落
-                  timelineItems.push({
-                    type: 'sunset',
-                    time: sunData.today.sunset,
-                    timeLabel: sunData.today.sunset.slice(11, 16),
-                    icon: '150',
-                    text: '日落',
-                    timestamp: new Date(sunData.today.sunset).getTime()
-                  });
-                  
-                  // 明天的日出
-                  if (sunData.tomorrow && sunData.tomorrow.code === "200") {
-                    timelineItems.push({
-                      type: 'sunrise',
-                      time: sunData.tomorrow.sunrise,
-                      timeLabel: sunData.tomorrow.sunrise.slice(11, 16),
-                      icon: '100',
-                      text: '日出',
-                      timestamp: new Date(sunData.tomorrow.sunrise).getTime()
-                    });
-                  }
-                }
-                
-                // 按时间排序，确保日出日落插入到正确位置
-                timelineItems.sort((a, b) => a.timestamp - b.timestamp);
-                
-                return timelineItems.map((item, i) => (
-                  <div key={i} className="flex flex-col items-center min-w-[56px] transition-transform duration-300 hover:scale-110">
-                    <div className="text-xs text-gray-500 mb-1">{item.timeLabel}</div>
-                    {item.type === 'sunrise' || item.type === 'sunset' ? (
-                      <WeatherIcon icon={item.icon} size={32} alt={item.text} />
+
+        <div className="w-full max-w-md flex flex-col gap-3">
+
+          {/* Hourly forecast */}
+          {weatherHourly && (
+            <div className="glass-card p-4 animate-fadein">
+              <p className="card-label">每小时预报</p>
+              <div className="flex gap-4 overflow-x-auto pb-1 scrollbar-hide">
+                {hourlyTimeline.map((item, i) => (
+                  <div key={i} className="flex flex-col items-center min-w-[52px] gap-1.5">
+                    <span className="text-xs text-white/55">{item.label}</span>
+                    <WeatherIcon icon={item.icon} className="text-[26px]" />
+                    {item.type === "hour" ? (
+                      <span className="text-sm font-semibold text-white tabular-nums">{item.temp}°</span>
                     ) : (
-                      <WeatherIcon icon={item.icon} size={32} alt={item.text} />
-                    )}
-                    {item.type === 'sunrise' || item.type === 'sunset' ? (
-                      <div className="text-xs text-orange-500 font-medium">{item.text}</div>
-                    ) : (
-                      <>
-                        <div className="text-base font-semibold">{item.temp}°</div>
-                        <div className="text-xs text-gray-500">{item.text}</div>
-                      </>
+                      <span className="text-xs text-amber-300 font-medium">{item.text}</span>
                     )}
                   </div>
-                ));
-              })()}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        {/* 每日天气 */}
-        {weatherDaily && weatherDaily.code === "200" && (
-          <div className="rounded-2xl bg-white shadow p-4 animate-fadein">
-            <div className="font-semibold text-lg mb-2">7天天气</div>
-            <div className="flex flex-col gap-2">
-              {weatherDaily.daily.map((d: any, i: number) => (
-                <div key={i} className="flex items-center justify-between text-sm px-2 py-1 rounded-lg hover:bg-gray-50 transition group">
-                  <span className="w-20 text-gray-500">{d.fxDate.slice(5)} {getDayOfWeek(d.fxDate)}</span>
-                  <span className="flex-1 text-gray-700 flex items-center gap-2">
-                    <WeatherIcon icon={d.iconDay} size={28} alt={d.textDay} />
-                    {d.textDay}
-                  </span>
-                  <span className="w-16 text-right text-gray-700">{d.tempMin}°~{d.tempMax}°</span>
+          )}
+
+          {/* Daily forecast */}
+          {weatherDaily && (
+            <div className="glass-card p-4 animate-fadein-slow">
+              <p className="card-label">7 天天气</p>
+              <div className="divide-y divide-white/10">
+                {weatherDaily.daily.map((d, i) => (
+                  <div key={i} className="flex items-center py-3 text-white gap-3">
+                    <span className="w-10 text-sm shrink-0">{getDayLabel(d.fxDate, i)}</span>
+                    <WeatherIcon icon={d.iconDay} className="text-xl shrink-0" />
+                    <span className="text-sm opacity-65 flex-1 truncate">{d.textDay}</span>
+                    <span className="text-sm tabular-nums shrink-0">
+                      <span className="opacity-45">{d.tempMin}°</span>
+                      <span className="mx-1 opacity-25">/</span>
+                      <span>{d.tempMax}°</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Sun & Details grid */}
+          {(sunToday || now) && (
+            <div className="grid grid-cols-2 gap-3">
+              {sunToday && (
+                <div className="glass-card p-4 animate-fadein-slow">
+                  <p className="card-label">日出 · 日落</p>
+                  <div className="flex justify-around mt-1">
+                    <div className="text-center">
+                      <WeatherIcon icon="100" className="text-2xl text-amber-300" />
+                      <p className="text-[11px] text-white/45 mt-1.5">日出</p>
+                      <p className="text-sm font-semibold text-white tabular-nums">{timePart(sunToday.sunrise)}</p>
+                    </div>
+                    <div className="w-px bg-white/15 self-stretch mx-1" />
+                    <div className="text-center">
+                      <WeatherIcon icon="150" className="text-2xl text-orange-400" />
+                      <p className="text-[11px] text-white/45 mt-1.5">日落</p>
+                      <p className="text-sm font-semibold text-white tabular-nums">{timePart(sunToday.sunset)}</p>
+                    </div>
+                  </div>
                 </div>
-              ))}
+              )}
+
+              {now && (
+                <div className="glass-card p-4 animate-fadein-slow">
+                  <p className="card-label">湿度 · 能见度</p>
+                  <div className="flex justify-around mt-1">
+                    <div className="text-center">
+                      <p className="text-xl font-semibold text-white tabular-nums">{now.humidity}<span className="text-sm font-normal">%</span></p>
+                      <p className="text-[11px] text-white/45 mt-1.5">湿度</p>
+                    </div>
+                    <div className="w-px bg-white/15 self-stretch mx-1" />
+                    <div className="text-center">
+                      <p className="text-xl font-semibold text-white tabular-nums">{now.vis}</p>
+                      <p className="text-[11px] text-white/45 mt-1.5">能见度 km</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
+
+        <footer className="text-[11px] text-white/25 mt-8 tracking-wide">
+          数据来源：和风天气 QWeather
+        </footer>
       </div>
-      <footer className="text-xs text-gray-400 mt-8 mb-2 animate-fadein-slow">数据来源：和风天气 QWeather</footer>
-      {/* 动画样式 */}
+
       <style>{`
-        .animate-fadein { animation: fadein 0.8s; }
-        .animate-fadein-slow { animation: fadein 1.5s; }
-        @keyframes fadein { from { opacity: 0; transform: translateY(24px);} to { opacity: 1; transform: none; } }
+        .animate-fadein { animation: fadein 0.7s ease-out both; }
+        .animate-fadein-slow { animation: fadein 1.1s ease-out both; }
+        @keyframes fadein {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: none; }
+        }
+        .glass-card {
+          background: rgba(255, 255, 255, 0.13);
+          backdrop-filter: blur(24px);
+          -webkit-backdrop-filter: blur(24px);
+          border-radius: 20px;
+          border: 1px solid rgba(255, 255, 255, 0.22);
+        }
+        .card-label {
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: rgba(255,255,255,0.45);
+          margin-bottom: 12px;
+        }
+        .weather-icon-hero { font-size: 72px; display: block; }
+        .temp-hero { font-size: clamp(80px, 22vw, 104px); }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
     </div>
   );
