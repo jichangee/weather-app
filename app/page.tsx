@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -219,6 +219,61 @@ export default function Home() {
   const [sunTomorrow, setSunTomorrow] = useState<SunResponse | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [pullOffset, setPullOffset] = useState(0);
+  const [pullDragging, setPullDragging] = useState(false);
+
+  const pullContainerRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef(0);
+  const pullOffsetRef = useRef(0);
+  const ignorePullRef = useRef(false);
+  const pullStateRef = useRef({
+    location: null as { lat: number; lon: number } | null,
+    refreshing: false,
+    dataLoading: false,
+  });
+
+  const loadWeather = useCallback(
+    async (loc: { lat: number; lon: number }, mode: "initial" | "refresh") => {
+      const locStr = `${loc.lon},${loc.lat}`;
+      setDataError(null);
+      if (mode === "initial") setDataLoading(true);
+      else setRefreshing(true);
+
+      try {
+        fetchApi<CityResponse>("/geo/v2/city/lookup", { location: locStr })
+          .then((d) => setCity(d?.location?.[0]?.name ?? ""))
+          .catch(() => setCity(""));
+
+        const [r, now, hourly, daily, sun0, sun1] = await Promise.all([
+          fetchApi<RainResponse>("/v7/minutely/5m", { location: locStr }),
+          fetchApi<NowResponse>("/v7/weather/now", { location: locStr }),
+          fetchApi<HourlyResponse>("/v7/weather/24h", { location: locStr }),
+          fetchApi<DailyResponse>("/v7/weather/7d", { location: locStr }),
+          fetchApi<SunResponse>("/v7/astronomy/sun", { location: locStr, date: dateCode(0) }),
+          fetchApi<SunResponse>("/v7/astronomy/sun", { location: locStr, date: dateCode(1) }),
+        ]);
+
+        if (r?.code === "200") setRain(r);
+        if (now?.code === "200") setWeatherNow(now);
+        if (hourly?.code === "200") setWeatherHourly(hourly);
+        if (daily?.code === "200") setWeatherDaily(daily);
+        if (sun0?.code === "200") setSunToday(sun0);
+        if (sun1?.code === "200") setSunTomorrow(sun1);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setDataError("数据获取失败: " + msg);
+      } finally {
+        setDataLoading(false);
+        setRefreshing(false);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    pullStateRef.current = { location, refreshing, dataLoading };
+  }, [location, refreshing, dataLoading]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -240,33 +295,68 @@ export default function Home() {
 
   useEffect(() => {
     if (!location) return;
-    const loc = `${location.lon},${location.lat}`;
-    setDataError(null);
-    setDataLoading(true);
+    void loadWeather(location, "initial");
+  }, [location, loadWeather]);
 
-    fetchApi<CityResponse>("/geo/v2/city/lookup", { location: loc })
-      .then((d) => setCity(d?.location?.[0]?.name ?? ""))
-      .catch(() => setCity(""));
+  const PULL_MAX = 96;
+  const PULL_RESIST = 0.45;
+  const PULL_TRIGGER = 52;
 
-    Promise.all([
-      fetchApi<RainResponse>("/v7/minutely/5m", { location: loc }),
-      fetchApi<NowResponse>("/v7/weather/now", { location: loc }),
-      fetchApi<HourlyResponse>("/v7/weather/24h", { location: loc }),
-      fetchApi<DailyResponse>("/v7/weather/7d", { location: loc }),
-      fetchApi<SunResponse>("/v7/astronomy/sun", { location: loc, date: dateCode(0) }),
-      fetchApi<SunResponse>("/v7/astronomy/sun", { location: loc, date: dateCode(1) }),
-    ])
-      .then(([r, now, hourly, daily, sun0, sun1]) => {
-        if (r?.code === "200") setRain(r);
-        if (now?.code === "200") setWeatherNow(now);
-        if (hourly?.code === "200") setWeatherHourly(hourly);
-        if (daily?.code === "200") setWeatherDaily(daily);
-        if (sun0?.code === "200") setSunToday(sun0);
-        if (sun1?.code === "200") setSunTomorrow(sun1);
-      })
-      .catch((e: Error) => setDataError("数据获取失败: " + e.message))
-      .finally(() => setDataLoading(false));
-  }, [location]);
+  useEffect(() => {
+    const el = pullContainerRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      ignorePullRef.current = window.scrollY > 4;
+      touchStartY.current = e.touches[0]?.clientY ?? 0;
+      setPullDragging(true);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const { location: loc, refreshing: ref, dataLoading: loading } = pullStateRef.current;
+      if (ignorePullRef.current) return;
+      if (window.scrollY > 4) {
+        ignorePullRef.current = true;
+        pullOffsetRef.current = 0;
+        setPullOffset(0);
+        return;
+      }
+      const dy = (e.touches[0]?.clientY ?? 0) - touchStartY.current;
+      if (dy > 0 && loc && !ref && !loading) {
+        e.preventDefault();
+        const next = Math.min(PULL_MAX, dy * PULL_RESIST);
+        pullOffsetRef.current = next;
+        setPullOffset(next);
+      } else if (dy <= 0) {
+        pullOffsetRef.current = 0;
+        setPullOffset(0);
+      }
+    };
+
+    const endPull = () => {
+      setPullDragging(false);
+      const po = pullOffsetRef.current;
+      const { location: loc, refreshing: ref, dataLoading: loading } = pullStateRef.current;
+      if (!ignorePullRef.current && po > PULL_TRIGGER && loc && !ref && !loading) {
+        void loadWeather(loc, "refresh");
+      }
+      pullOffsetRef.current = 0;
+      setPullOffset(0);
+      ignorePullRef.current = false;
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", endPull);
+    el.addEventListener("touchcancel", endPull);
+
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", endPull);
+      el.removeEventListener("touchcancel", endPull);
+    };
+  }, [loadWeather]);
 
   const hourlyTimeline = useMemo(() => {
     if (!weatherHourly?.hourly) return [];
@@ -316,6 +406,8 @@ export default function Home() {
   const now = weatherNow?.now;
   const bgColors = getBgColors();
 
+  const pullTransition = pullDragging ? "none" : "transform 0.22s cubic-bezier(0.2, 0.85, 0.25, 1)";
+
   return (
     <div className="min-h-screen relative overflow-hidden select-none">
       {/* Soft dark background */}
@@ -334,6 +426,29 @@ export default function Home() {
         }}
       />
 
+      {(pullOffset > 10 || refreshing) && (
+        <div
+          className="fixed left-0 right-0 z-30 flex justify-center pointer-events-none pt-[max(10px,env(safe-area-inset-top))] text-[11px] tracking-wide text-white/45"
+          style={{ opacity: refreshing ? 0.95 : Math.min(1, pullOffset / PULL_TRIGGER) }}
+        >
+          {refreshing ? (
+            <span className="animate-pulse">正在刷新…</span>
+          ) : pullOffset >= PULL_TRIGGER ? (
+            <span className="text-white/55">松手刷新</span>
+          ) : (
+            <span>下拉刷新</span>
+          )}
+        </div>
+      )}
+
+      <div
+        ref={pullContainerRef}
+        className="min-h-screen"
+        style={{
+          transform: `translateY(${pullOffset}px)`,
+          transition: pullTransition,
+        }}
+      >
       <div className="flex flex-col items-center px-4 pb-12">
 
         {/* Location */}
@@ -460,6 +575,7 @@ export default function Home() {
         <footer className="text-[11px] text-white/20 mt-8 tracking-wide">
           数据来源：和风天气 QWeather
         </footer>
+      </div>
       </div>
 
       <style>{`
