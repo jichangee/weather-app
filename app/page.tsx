@@ -102,6 +102,44 @@ function getBgColors(): { from: string; to: string } {
   return                       { from: "#14101f", to: "#261832" };   // 黄昏：暗紫蓝
 }
 
+const GEO_CACHE_KEY = "weather-geo";
+const GEO_CACHE_TTL_MS = 30 * 60 * 1000;
+
+type GeoPoint = { lat: number; lon: number };
+
+function readCachedLocation(): GeoPoint | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(GEO_CACHE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as GeoPoint & { savedAt?: number };
+    if (
+      typeof data.lat !== "number" ||
+      typeof data.lon !== "number" ||
+      typeof data.savedAt !== "number"
+    ) {
+      return null;
+    }
+    if (Date.now() - data.savedAt > GEO_CACHE_TTL_MS) return null;
+    if (Math.abs(data.lat) > 90 || Math.abs(data.lon) > 180) return null;
+    return { lat: data.lat, lon: data.lon };
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedLocation(loc: GeoPoint): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      GEO_CACHE_KEY,
+      JSON.stringify({ ...loc, savedAt: Date.now() })
+    );
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
 // ─── Components ───────────────────────────────────────────────────────────────
 
 function WeatherIcon({ icon, className = "" }: { icon: string; className?: string }) {
@@ -276,6 +314,13 @@ export default function Home() {
   }, [location, refreshing, dataLoading]);
 
   useEffect(() => {
+    const cached = readCachedLocation();
+    if (cached) {
+      setLocation(cached);
+      setLoading(false);
+      return;
+    }
+
     if (!navigator.geolocation) {
       setGeoError("浏览器不支持定位");
       setLoading(false);
@@ -283,7 +328,9 @@ export default function Home() {
     }
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        setLocation({ lat: coords.latitude, lon: coords.longitude });
+        const loc = { lat: coords.latitude, lon: coords.longitude };
+        saveCachedLocation(loc);
+        setLocation(loc);
         setLoading(false);
       },
       ({ message }) => {
