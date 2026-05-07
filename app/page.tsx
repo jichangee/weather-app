@@ -102,6 +102,15 @@ function getBgColors(): { from: string; to: string } {
   return                       { from: "#14101f", to: "#261832" };   // 黄昏：暗紫蓝
 }
 
+function getWeatherScene(now?: NowWeather | null): "rain" | "sunny" | "default" {
+  if (!now) return "default";
+  const text = now.text ?? "";
+  const icon = now.icon ?? "";
+  if (/雨|雷|暴雨|阵雨|小雨|中雨|大雨/.test(text) || /^3\d{2}$/.test(icon)) return "rain";
+  if (text.includes("晴") || icon === "100" || icon === "150") return "sunny";
+  return "default";
+}
+
 const GEO_CACHE_KEY = "weather-geo";
 const GEO_CACHE_TTL_MS = 30 * 60 * 1000;
 
@@ -255,12 +264,12 @@ function DailyTrendChart({ daily }: { daily: DailyItem[] }) {
   const highRange = Math.max(1, highMax - highMin);
   const lowRange = Math.max(1, lowMax - lowMin);
 
-  const W = 420, H = 194;
+  const W = 420, H = 232;
   const pL = 24, pR = 24;
   const cW = W - pL - pR;
   const highTop = 44, highBottom = 82;
-  const lowTop = 124, lowBottom = 162;
-  const iconY = 92;
+  const lowTop = 116, lowBottom = 150;
+  const iconY = 184;
 
   const px = (i: number) => pL + (i / (data.length - 1)) * cW;
   const highY = (t: number) => highTop + (1 - (t - highMin) / highRange) * (highBottom - highTop);
@@ -299,6 +308,7 @@ function DailyTrendChart({ daily }: { daily: DailyItem[] }) {
         {data.map((d, i) => {
           const x = px(i);
           const anchor = i === 0 ? "start" : i === data.length - 1 ? "end" : "middle";
+          const weatherX = Math.min(W - 24, Math.max(24, x));
           return (
             <g key={d.fxDate}>
               <text
@@ -324,12 +334,6 @@ function DailyTrendChart({ daily }: { daily: DailyItem[] }) {
                 {d.tempMax}°
               </text>
 
-              <foreignObject x={x - 13} y={iconY} width="26" height="26">
-                <div className="flex h-[26px] w-[26px] items-center justify-center text-[23px] text-white/75">
-                  <WeatherIcon icon={d.iconDay} />
-                </div>
-              </foreignObject>
-
               <circle cx={lowPts[i][0]} cy={lowPts[i][1]} r="3" fill="rgba(160,205,255,0.95)" />
               <text
                 x={x}
@@ -342,7 +346,13 @@ function DailyTrendChart({ daily }: { daily: DailyItem[] }) {
                 {d.tempMin}°
               </text>
 
-              <text x={x} y="190" textAnchor={anchor} fontSize="10" fill="rgba(255,255,255,0.34)">
+              <foreignObject x={weatherX - 13} y={iconY} width="26" height="26">
+                <div className="flex h-[26px] w-[26px] items-center justify-center text-[23px] text-white/75">
+                  <WeatherIcon icon={d.iconDay} />
+                </div>
+              </foreignObject>
+
+              <text x={weatherX} y="228" textAnchor="middle" fontSize="10" fill="rgba(255,255,255,0.34)">
                 {d.textDay}
               </text>
             </g>
@@ -563,6 +573,7 @@ export default function Home() {
   const isRaining = rain?.summary && rain.summary !== "未来两小时无降水";
   const now = weatherNow?.now;
   const bgColors = getBgColors();
+  const weatherScene = getWeatherScene(now);
 
   const pullTransition = pullDragging ? "none" : "transform 0.22s cubic-bezier(0.2, 0.85, 0.25, 1)";
 
@@ -575,6 +586,18 @@ export default function Home() {
           background: `linear-gradient(to bottom, ${bgColors.from}, ${bgColors.to})`,
         }}
       />
+      {weatherScene === "rain" && (
+        <>
+          <div className="weather-rain-sheen fixed inset-x-0 top-0 h-[42vh] -z-10 pointer-events-none" />
+          <div className="weather-rain-lines fixed inset-x-0 top-0 h-[46vh] -z-10 pointer-events-none" />
+        </>
+      )}
+      {weatherScene === "sunny" && (
+        <>
+          <div className="weather-sun-glow fixed inset-x-0 top-0 h-[42vh] -z-10 pointer-events-none" />
+          <div className="weather-sun-rays fixed inset-x-0 top-0 h-[48vh] -z-10 pointer-events-none" />
+        </>
+      )}
       {/* Subtle top glow */}
       <div
         className="fixed inset-0 -z-10"
@@ -747,6 +770,42 @@ export default function Home() {
         }
         .weather-icon-hero { font-size: 68px; display: block; }
         .temp-hero { font-size: clamp(80px, 22vw, 100px); }
+        .weather-rain-sheen {
+          background:
+            radial-gradient(ellipse 80% 52% at 50% 0%, rgba(90,145,210,0.26) 0%, rgba(60,110,180,0.08) 46%, transparent 76%),
+            linear-gradient(to bottom, rgba(20,45,75,0.36), transparent);
+        }
+        .weather-rain-lines {
+          opacity: 0.62;
+          background-image:
+            repeating-linear-gradient(108deg, transparent 0 18px, rgba(190,220,255,0.18) 18px 19px, transparent 19px 34px),
+            repeating-linear-gradient(108deg, transparent 0 42px, rgba(120,175,235,0.12) 42px 43px, transparent 43px 64px);
+          background-size: 120px 180px, 180px 240px;
+          animation: rain-drift 0.9s linear infinite;
+          mask-image: linear-gradient(to bottom, black 0%, black 54%, transparent 100%);
+          -webkit-mask-image: linear-gradient(to bottom, black 0%, black 54%, transparent 100%);
+        }
+        .weather-sun-glow {
+          background:
+            radial-gradient(circle at 50% 0%, rgba(255,220,130,0.34) 0%, rgba(255,185,90,0.16) 30%, transparent 62%),
+            radial-gradient(ellipse 72% 48% at 50% 6%, rgba(120,190,255,0.16) 0%, transparent 72%);
+        }
+        .weather-sun-rays {
+          opacity: 0.72;
+          background:
+            conic-gradient(from 205deg at 50% -18%, transparent 0deg, rgba(255,225,150,0.18) 10deg, transparent 22deg, transparent 38deg, rgba(255,235,175,0.12) 50deg, transparent 64deg, transparent 360deg);
+          animation: sun-breathe 6s ease-in-out infinite alternate;
+          mask-image: linear-gradient(to bottom, black 0%, rgba(0,0,0,0.75) 48%, transparent 100%);
+          -webkit-mask-image: linear-gradient(to bottom, black 0%, rgba(0,0,0,0.75) 48%, transparent 100%);
+        }
+        @keyframes rain-drift {
+          from { background-position: 0 0, 0 0; }
+          to { background-position: -42px 118px, -58px 156px; }
+        }
+        @keyframes sun-breathe {
+          from { opacity: 0.52; transform: translateY(-4px) scale(0.98); }
+          to { opacity: 0.82; transform: translateY(0) scale(1.02); }
+        }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
