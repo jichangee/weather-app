@@ -19,14 +19,19 @@ interface HourlyItem {
   icon: string;
   temp: string;
   text: string;
+  pop?: string;
+  precip?: string;
 }
 
 interface DailyItem {
   fxDate: string;
   iconDay: string;
+  iconNight?: string;
   textDay: string;
+  textNight?: string;
   tempMin: string;
   tempMax: string;
+  precip?: string;
 }
 
 interface NowResponse {
@@ -102,13 +107,60 @@ function getBgColors(): { from: string; to: string } {
   return                       { from: "#14101f", to: "#261832" };   // 黄昏：暗紫蓝
 }
 
+function isRainWeather(text?: string, icon?: string): boolean {
+  if (/雨|雷|暴雨|阵雨|小雨|中雨|大雨/.test(text ?? "") || /^3\d{2}$/.test(icon ?? "")) return true;
+  return false;
+}
+
 function getWeatherScene(now?: NowWeather | null): "rain" | "sunny" | "default" {
   if (!now) return "default";
   const text = now.text ?? "";
   const icon = now.icon ?? "";
-  if (/雨|雷|暴雨|阵雨|小雨|中雨|大雨/.test(text) || /^3\d{2}$/.test(icon)) return "rain";
+  if (isRainWeather(text, icon)) return "rain";
   if (text.includes("晴") || icon === "100" || icon === "150") return "sunny";
   return "default";
+}
+
+function numberValue(value?: string): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getTodayRainNotice(today?: DailyItem, hourly?: HourlyItem[]): string | null {
+  if (!today) return null;
+
+  const precip = numberValue(today.precip);
+  if (precip != null && precip > 0) {
+    return `今天可能有降雨，预计降水 ${precip.toFixed(1)} mm`;
+  }
+
+  const todayHours = hourly?.filter((h) => h.fxTime?.startsWith(today.fxDate)) ?? [];
+  const highestPopHour = todayHours
+    .map((h) => ({ hour: h, pop: numberValue(h.pop) }))
+    .filter((item): item is { hour: HourlyItem; pop: number } => item.pop != null)
+    .sort((a, b) => b.pop - a.pop)[0];
+
+  if (highestPopHour && highestPopHour.pop >= 40) {
+    return `今天 ${timePart(highestPopHour.hour.fxTime)} 前后降雨概率 ${highestPopHour.pop}%`;
+  }
+
+  const precipHour = todayHours.find((h) => {
+    const hourlyPrecip = numberValue(h.precip);
+    return hourlyPrecip != null && hourlyPrecip > 0;
+  });
+  if (precipHour) {
+    return `今天 ${timePart(precipHour.fxTime)} 前后可能有降雨`;
+  }
+
+  if (
+    isRainWeather(today.textDay, today.iconDay) ||
+    isRainWeather(today.textNight, today.iconNight)
+  ) {
+    return "今天可能有降雨，出门记得带伞";
+  }
+
+  return null;
 }
 
 const GEO_CACHE_KEY = "weather-geo";
@@ -570,10 +622,14 @@ export default function Home() {
     return items.sort((a, b) => a.ts - b.ts);
   }, [weatherHourly, sunToday, sunTomorrow]);
 
-  const isRaining = rain?.summary && rain.summary !== "未来两小时无降水";
+  const hasCurrentRainSummary = Boolean(rain?.summary && rain.summary !== "未来两小时无降水");
   const now = weatherNow?.now;
   const bgColors = getBgColors();
   const weatherScene = getWeatherScene(now);
+  const isCurrentlyRaining = hasCurrentRainSummary || weatherScene === "rain";
+  const todayRainNotice = !isCurrentlyRaining
+    ? getTodayRainNotice(weatherDaily?.daily?.[0], weatherHourly?.hourly)
+    : null;
 
   const pullTransition = pullDragging ? "none" : "transform 0.22s cubic-bezier(0.2, 0.85, 0.25, 1)";
 
@@ -658,13 +714,19 @@ export default function Home() {
               <span>·</span>
               <span>{now.windDir} {now.windScale}级</span>
             </div>
-            {isRaining && (
+            {hasCurrentRainSummary ? (
               <div className="mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm"
                 style={{ background: "rgba(100,160,255,0.15)", border: "1px solid rgba(100,160,255,0.25)" }}>
                 <span>🌧</span>
                 <span className="opacity-80">{rain?.summary}</span>
               </div>
-            )}
+            ) : todayRainNotice ? (
+              <div className="mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm"
+                style={{ background: "rgba(120,170,220,0.14)", border: "1px solid rgba(140,190,240,0.24)" }}>
+                <span>☔</span>
+                <span className="opacity-80">{todayRainNotice}</span>
+              </div>
+            ) : null}
           </div>
         ) : dataLoading ? (
           <div className="w-full max-w-md text-center text-white/30 text-sm mt-8 mb-10 animate-pulse">
@@ -776,14 +838,33 @@ export default function Home() {
             linear-gradient(to bottom, rgba(20,45,75,0.36), transparent);
         }
         .weather-rain-lines {
-          opacity: 0.62;
-          background-image:
-            repeating-linear-gradient(108deg, transparent 0 18px, rgba(190,220,255,0.18) 18px 19px, transparent 19px 34px),
-            repeating-linear-gradient(108deg, transparent 0 42px, rgba(120,175,235,0.12) 42px 43px, transparent 43px 64px);
-          background-size: 120px 180px, 180px 240px;
-          animation: rain-drift 0.9s linear infinite;
+          opacity: 0.5;
+          overflow: hidden;
+          contain: paint;
           mask-image: linear-gradient(to bottom, black 0%, black 54%, transparent 100%);
           -webkit-mask-image: linear-gradient(to bottom, black 0%, black 54%, transparent 100%);
+        }
+        .weather-rain-lines::before,
+        .weather-rain-lines::after {
+          content: "";
+          position: absolute;
+          inset: -18% -12%;
+          will-change: transform;
+          transform: translate3d(0, 0, 0);
+          backface-visibility: hidden;
+        }
+        .weather-rain-lines::before {
+          background-image:
+            repeating-linear-gradient(108deg, transparent 0 22px, rgba(205,230,255,0.13) 22px 23px, transparent 23px 44px);
+          background-size: 150px 220px;
+          animation: rain-drift-near 2.4s linear infinite;
+        }
+        .weather-rain-lines::after {
+          opacity: 0.72;
+          background-image:
+            repeating-linear-gradient(108deg, transparent 0 48px, rgba(125,180,235,0.1) 48px 49px, transparent 49px 78px);
+          background-size: 220px 300px;
+          animation: rain-drift-far 3.6s linear infinite;
         }
         .weather-sun-glow {
           background:
@@ -798,9 +879,13 @@ export default function Home() {
           mask-image: linear-gradient(to bottom, black 0%, rgba(0,0,0,0.75) 48%, transparent 100%);
           -webkit-mask-image: linear-gradient(to bottom, black 0%, rgba(0,0,0,0.75) 48%, transparent 100%);
         }
-        @keyframes rain-drift {
-          from { background-position: 0 0, 0 0; }
-          to { background-position: -42px 118px, -58px 156px; }
+        @keyframes rain-drift-near {
+          from { transform: translate3d(0, -36px, 0); }
+          to { transform: translate3d(-28px, 56px, 0); }
+        }
+        @keyframes rain-drift-far {
+          from { transform: translate3d(0, -44px, 0); }
+          to { transform: translate3d(-22px, 48px, 0); }
         }
         @keyframes sun-breathe {
           from { opacity: 0.52; transform: translateY(-4px) scale(0.98); }
