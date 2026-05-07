@@ -242,6 +242,117 @@ function TempLineChart({ hourly }: { hourly: HourlyItem[] }) {
   );
 }
 
+function DailyTrendChart({ daily }: { daily: DailyItem[] }) {
+  const data = daily.slice(0, 7);
+  if (data.length < 2) return null;
+
+  const highs = data.map((d) => Number(d.tempMax));
+  const lows = data.map((d) => Number(d.tempMin));
+  const highMin = Math.min(...highs);
+  const highMax = Math.max(...highs);
+  const lowMin = Math.min(...lows);
+  const lowMax = Math.max(...lows);
+  const highRange = Math.max(1, highMax - highMin);
+  const lowRange = Math.max(1, lowMax - lowMin);
+
+  const W = 420, H = 194;
+  const pL = 24, pR = 24;
+  const cW = W - pL - pR;
+  const highTop = 44, highBottom = 82;
+  const lowTop = 124, lowBottom = 162;
+  const iconY = 92;
+
+  const px = (i: number) => pL + (i / (data.length - 1)) * cW;
+  const highY = (t: number) => highTop + (1 - (t - highMin) / highRange) * (highBottom - highTop);
+  const lowY = (t: number) => lowTop + (1 - (t - lowMin) / lowRange) * (lowBottom - lowTop);
+  const highPts = highs.map((t, i) => [px(i), highY(t)] as [number, number]);
+  const lowPts = lows.map((t, i) => [px(i), lowY(t)] as [number, number]);
+
+  const pathFrom = (pts: Array<[number, number]>) =>
+    pts
+      .map(([x, y], i) => {
+        if (i === 0) return `M${x.toFixed(1)},${y.toFixed(1)}`;
+        const [px0, py0] = pts[i - 1];
+        const cx = ((px0 + x) / 2).toFixed(1);
+        return `C${cx},${py0.toFixed(1)} ${cx},${y.toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+
+  return (
+    <div className="overflow-hidden">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ display: "block" }}>
+        <path
+          d={pathFrom(highPts)}
+          fill="none"
+          stroke="rgba(255,205,120,0.9)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <path
+          d={pathFrom(lowPts)}
+          fill="none"
+          stroke="rgba(120,180,255,0.82)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+
+        {data.map((d, i) => {
+          const x = px(i);
+          const anchor = i === 0 ? "start" : i === data.length - 1 ? "end" : "middle";
+          return (
+            <g key={d.fxDate}>
+              <text
+                x={x}
+                y="16"
+                textAnchor={anchor}
+                fontSize="11"
+                fill="rgba(255,255,255,0.45)"
+                fontWeight="600"
+              >
+                {getDayLabel(d.fxDate, i)}
+              </text>
+
+              <circle cx={highPts[i][0]} cy={highPts[i][1]} r="3" fill="rgba(255,220,150,0.95)" />
+              <text
+                x={x}
+                y={highPts[i][1] - 9}
+                textAnchor={anchor}
+                fontSize="13"
+                fill="rgba(255,235,190,0.9)"
+                fontWeight="600"
+              >
+                {d.tempMax}°
+              </text>
+
+              <foreignObject x={x - 13} y={iconY} width="26" height="26">
+                <div className="flex h-[26px] w-[26px] items-center justify-center text-[23px] text-white/75">
+                  <WeatherIcon icon={d.iconDay} />
+                </div>
+              </foreignObject>
+
+              <circle cx={lowPts[i][0]} cy={lowPts[i][1]} r="3" fill="rgba(160,205,255,0.95)" />
+              <text
+                x={x}
+                y={lowPts[i][1] + 18}
+                textAnchor={anchor}
+                fontSize="13"
+                fill="rgba(205,230,255,0.82)"
+                fontWeight="600"
+              >
+                {d.tempMin}°
+              </text>
+
+              <text x={x} y="190" textAnchor={anchor} fontSize="10" fill="rgba(255,255,255,0.34)">
+                {d.textDay}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function Home() {
@@ -556,22 +667,9 @@ export default function Home() {
 
           {/* Daily forecast */}
           {weatherDaily && (
-            <div className="glass-card p-4 animate-fadein-slow">
+            <div className="glass-card px-4 pt-4 pb-3 animate-fadein-slow">
               <p className="card-label">7 天天气</p>
-              <div className="divide-y divide-white/8">
-                {weatherDaily.daily.map((d, i) => (
-                  <div key={i} className="flex items-center py-3 text-white gap-3">
-                    <span className="w-10 text-sm opacity-70 shrink-0">{getDayLabel(d.fxDate, i)}</span>
-                    <WeatherIcon icon={d.iconDay} className="text-xl opacity-80 shrink-0" />
-                    <span className="text-sm opacity-50 flex-1 truncate">{d.textDay}</span>
-                    <span className="text-sm tabular-nums shrink-0">
-                      <span className="opacity-35">{d.tempMin}°</span>
-                      <span className="mx-1 opacity-20">/</span>
-                      <span className="opacity-75">{d.tempMax}°</span>
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <DailyTrendChart daily={weatherDaily.daily} />
             </div>
           )}
 
